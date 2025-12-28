@@ -9,7 +9,13 @@ import roastRouter from './routes/roast.js';
 
 const app = new Hono();
 
-app.use('*', cors());
+app.use('*', cors({
+  origin: [
+    'https://roast.siddz.com',
+    // 'http://localhost:3000', // Uncomment for local testing
+  ],
+  credentials: true,
+}));
 
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {

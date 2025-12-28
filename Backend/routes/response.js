@@ -6,8 +6,8 @@ import { fetchRedditComments, fetchUserProfile } from '../services/redditApi.js'
 const router = new Hono()
 
 const limiter = rateLimiter({
-  windowMs: 15 * 60 * 1000,
-  limit: 200, 
+  windowMs: 40 * 60 * 1000,
+  limit: 20, 
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (c) => c.req.header('x-forwarded-for') || c.req.ip,
