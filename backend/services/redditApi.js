@@ -1,3 +1,5 @@
+import { fetchArcticComments, fetchArcticProfile } from './arcticShift.js';
+
 const REDDIT_OAUTH_URL = 'https://oauth.reddit.com';
 const REDDIT_TOKEN_URL = 'https://www.reddit.com/api/v1/access_token';
 
@@ -128,7 +130,26 @@ async function makeRedditRequest(endpoint, keyIndex = 0) {
   return response.json();
 }
 
-async function fetchRedditComments(username, maxComments = 500) {
+function shouldFallbackToArchive(error) {
+  const errors = [error, error?.cause].filter(Boolean);
+  return errors.some(current => {
+    const message = (current.message || '').toLowerCase();
+    return (
+      message.includes('user not found') ||
+      message.includes('no comments found') ||
+      message.includes('private or suspended') ||
+      message.includes('rate limited') ||
+      message.includes('rate limit exceeded') ||
+      message.includes('credentials not found') ||
+      message.includes('oauth authentication failed') ||
+      message.includes('reddit api error') ||
+      current instanceof TypeError ||
+      current.name === 'AbortError'
+    );
+  });
+}
+
+async function fetchRedditCommentsDirect(username, maxComments = 500) {
   try {
     const comments = [];
     let after = null;
@@ -218,11 +239,11 @@ async function fetchRedditComments(username, maxComments = 500) {
       throw error;
     }
     
-    throw new Error('Failed to fetch user comments');
+    throw new Error('Failed to fetch user comments', { cause: error });
   }
 }
 
-async function fetchUserProfile(username) {
+async function fetchUserProfileDirect(username) {
   try {
     const endpoint = `/user/${username}/about?raw_json=1`;
     const data = await makeRedditRequest(endpoint);
@@ -262,8 +283,59 @@ async function fetchUserProfile(username) {
       throw error;
     }
     
-    throw new Error('Failed to fetch user profile');
+    throw new Error('Failed to fetch user profile', { cause: error });
   }
 }
 
-export { fetchRedditComments, fetchUserProfile }; 
+async function fetchRedditComments(username, maxComments = 500) {
+  try {
+    return await fetchRedditCommentsDirect(username, maxComments);
+  } catch (error) {
+    if (!shouldFallbackToArchive(error)) {
+      throw error;
+    }
+
+    console.warn(`Falling back to Arctic Shift archive for comments of ${username}: ${error.message}`);
+
+    try {
+      const comments = await fetchArcticComments(username, maxComments);
+      if (comments.length === 0) {
+        throw new Error('User not found or no comments available');
+      }
+      return comments;
+    } catch (arcticError) {
+      console.error('Arctic Shift fallback failed for comments:', arcticError);
+      if (arcticError.message.includes('User not found') || arcticError.message.includes('No comments')) {
+        throw arcticError;
+      }
+      throw error;
+    }
+  }
+}
+
+async function fetchUserProfile(username) {
+  try {
+    return await fetchUserProfileDirect(username);
+  } catch (error) {
+    if (!shouldFallbackToArchive(error)) {
+      throw error;
+    }
+
+    console.warn(`Falling back to Arctic Shift archive for profile of ${username}: ${error.message}`);
+
+    try {
+      let sampleComments = [];
+      try {
+        sampleComments = await fetchArcticComments(username, 25);
+      } catch (sampleError) {
+        sampleComments = [];
+      }
+      return await fetchArcticProfile(username, sampleComments);
+    } catch (arcticError) {
+      console.error('Arctic Shift fallback failed for profile:', arcticError);
+      throw error;
+    }
+  }
+}
+
+export { fetchRedditComments, fetchUserProfile, shouldFallbackToArchive };

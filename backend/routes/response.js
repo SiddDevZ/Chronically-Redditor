@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { getConnInfo } from '@hono/node-server/conninfo'
 import { rateLimiter } from 'hono-rate-limiter'
 import Roast from '../models/Roast.js'
 import { fetchRedditComments, fetchUserProfile } from '../services/redditApi.js'
+import { getCodexResponse, isConfigured as isCodexConfigured } from '../services/codex.js'
 
 const router = new Hono()
 
@@ -10,8 +12,20 @@ const limiter = rateLimiter({
   limit: 5, 
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (c) => c.req.header('x-forwarded-for') || c.req.ip,
+  keyGenerator: (c) => c.req.header('x-forwarded-for')?.split(',').at(-1).trim() || getConnInfo(c).remote.address || 'unknown',
 })
+
+async function getAIResponse(prompt, retryCount = 0, useProModel = false) {
+  if (isCodexConfigured()) {
+    try {
+      return await getCodexResponse(prompt)
+    } catch (error) {
+      console.warn(`Codex provider failed (${error.message}), falling back to Gemini/OpenRouter.`);
+    }
+  }
+
+  return getGeminiResponse(prompt, retryCount, useProModel)
+}
 
 async function getGeminiResponse(prompt, retryCount = 0, useProModel = false) {
   if (process.env.GEMINI) {
@@ -190,7 +204,7 @@ ${JSON.stringify(recentComments)}
 Generate the JSON response:`
 
   try {
-    const response = await getGeminiResponse(roastPrompt)
+    const response = await getAIResponse(roastPrompt)
 
     await Roast.findOneAndUpdate(
       { username },
@@ -286,7 +300,7 @@ For all generated text values in the JSON object: DO NOT USE ANY MARKDOWN FORMAT
 
     try {
         // Use the flash model (gemini-2.5-flash)
-        const response = await getGeminiResponse(combinedRoastPrompt);
+        const response = await getAIResponse(combinedRoastPrompt);
         
         if (!response) {
             throw new Error("No response received from AI.");
@@ -330,6 +344,13 @@ router.post('/', limiter, async (c) => {
     }
 
     const cleanUsername = username.trim().startsWith('u/') ? username.trim().slice(2) : username.trim()
+
+    if (!/^[A-Za-z0-9_-]{3,20}$/.test(cleanUsername)) {
+      return c.json({
+        success: false,
+        message: 'Invalid Reddit username'
+      }, 400)
+    }
 
     try {
       const existingUser = await Roast.findOne({ 

@@ -2,12 +2,13 @@ import { Hono } from 'hono'
 import Roast from '../models/Roast.js'
 
 const router = new Hono()
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 router.get('/:username', async (c) => {
   const { username } = c.req.param()
   try {
     const roast = await Roast.findOne({
-      username: { $regex: new RegExp(`^${username}$`, 'i') },
+      username: { $regex: new RegExp(`^${escapeRegExp(username)}$`, 'i') },
     })
 
     if (!roast) {
@@ -52,7 +53,7 @@ router.post('/:username/seen', async (c) => {
   const { username } = c.req.param()
   try {
     const roast = await Roast.findOneAndUpdate(
-      { username: { $regex: new RegExp(`^${username}$`, 'i') } },
+      { username: { $regex: new RegExp(`^${escapeRegExp(username)}$`, 'i') } },
       { questionsSeen: true },
       { new: true }
     )
@@ -64,24 +65,6 @@ router.post('/:username/seen', async (c) => {
     return c.json({ success: true, message: 'Questions marked as seen.' })
   } catch (error) {
     console.error('Error marking questions as seen:', error)
-    return c.json({ success: false, message: 'Server error' }, 500)
-  }
-})
-
-router.delete('/:username', async (c) => {
-  const { username } = c.req.param()
-  try {
-    const roast = await Roast.findOneAndDelete({
-      username: { $regex: new RegExp(`^${username}$`, 'i') }
-    })
-
-    if (!roast) {
-      return c.json({ success: false, message: 'Roast not found' }, 404)
-    }
-
-    return c.json({ success: true, message: 'Roast deleted successfully.' })
-  } catch (error) {
-    console.error('Error deleting roast:', error)
     return c.json({ success: false, message: 'Server error' }, 500)
   }
 })

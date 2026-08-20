@@ -34,7 +34,7 @@ mongoose.connect(dbUrl)
     process.exit(1);
   });
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3003;
 
 app.get('/', (c) => c.text('Hello World!'));
 
@@ -43,6 +43,7 @@ app.route('/api/roast', roastRouter);
 
 serve({
   fetch: app.fetch,
+  hostname: '127.0.0.1',
   port,
 });
 

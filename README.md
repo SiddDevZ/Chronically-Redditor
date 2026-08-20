@@ -45,7 +45,10 @@
 
 ### **APIs**
 - **Reddit API** - Comment and profile data extraction
-- **Google Gemini AI** - AI-powered content generation
+- **Arctic Shift Photon** - Archived public Reddit data fallback when direct Reddit OAuth is unavailable, suspended, rate limited or unreachable
+- **Codex Everywhere** - Primary AI provider for content generation
+- **Google Gemini AI** - AI-powered content generation fallback
+- **OpenRouter** - Additional AI provider fallback
 
 ---
 
@@ -62,11 +65,12 @@ reddit-profile-roaster/
 │   ├── Footer.jsx               # Site footer
 │   ├── LanguageSwitcher.jsx     # Language selector
 │   └── magicui/                 # Custom UI components
-├── Backend/                      # Server-side code
+├── backend/                      # Server-side code
 │   ├── server.js               # Main server
 │   ├── routes/                 # API routes
 │   │   ├── response.js         # User processing
 │   │   └── roast.js           # Roast retrieval
+│   ├── services/                # Reddit, Arctic Shift and AI providers
 │   └── models/                 # Database schemas
 ├── public/                      # Static assets
 │   └── locales/               # Translation files
@@ -97,18 +101,35 @@ reddit-profile-roaster/
    npm install
    
    # Backend
-   cd Backend
+   cd backend
    npm install
    ```
 
 3. **Environment setup**
    
-   Create `.env` in the Backend directory:
+   Create `.env` in the backend directory:
    ```env
+   PORT=3003
    DATABASE_URL=your_mongodb_connection_string
-   GEMINI_API_KEY_1=your_gemini_api_key_1
-   GEMINI_API_KEY_2=your_gemini_api_key_2
-   # Add more API keys as needed
+
+   # Optional direct Reddit API credentials; Arctic Shift is used as fallback
+   REDDIT_CLIENT_ID=your_reddit_client_id
+   REDDIT_CLIENT_SECRET=your_reddit_client_secret
+   REDDIT_CLIENT_ID2=your_second_reddit_client_id
+   REDDIT_CLIENT_SECRET2=your_second_reddit_client_secret
+
+   # Codex Everywhere is tried first when configured
+   CODEX_BASE_URL=your_codex_everywhere_base_url
+   CODEX_API_KEY=your_codex_everywhere_api_key
+   CODEX_MODEL=gpt-5.4
+
+   # Optional AI fallbacks
+   GEMINI=comma_separated_gemini_keys
+   OPENROUTER_API_KEY=your_openrouter_key
+   API_KEYS=comma_separated_gemini_keys
+
+   # Optional Arctic Shift override
+   ARCTIC_SHIFT_BASE_URL=https://arctic-shift.photon-reddit.com
    ```
 
 4. **Configure API endpoints**
@@ -124,7 +145,7 @@ reddit-profile-roaster/
    
    **Backend (Terminal 1):**
    ```bash
-   cd Backend
+   cd backend
    npm start
    ```
    
@@ -190,8 +211,20 @@ The application uses MongoDB with the following main schema:
 
 - **User not found** - Clear error messages with retry options
 - **API failures** - Graceful degradation with fallback responses
+- **Reddit unavailable/suspended/rate limited** - Automatic fallback to the Arctic Shift Photon archive for public comment and profile data; archived results may include comments later deleted from Reddit, subject to Arctic Shift's coverage and removal policies
 - **Network issues** - Automatic retry logic with exponential backoff
 - **Invalid data** - Input validation and sanitization
+
+---
+
+## 🧪 **Testing**
+
+The backend uses Node's built-in test runner. No live network calls are made, external requests are mocked.
+
+```bash
+cd backend
+npm test
+```
 
 ---
 
