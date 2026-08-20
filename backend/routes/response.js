@@ -4,6 +4,7 @@ import { rateLimiter } from 'hono-rate-limiter'
 import Roast from '../models/Roast.js'
 import { fetchRedditComments, fetchUserProfile } from '../services/redditApi.js'
 import { getCodexResponse, isConfigured as isCodexConfigured } from '../services/codex.js'
+import { DAILY_ROAST_LIMIT, releaseDailyRoast, reserveDailyRoast } from '../services/dailyRoastLimit.js'
 
 const router = new Hono()
 
@@ -333,6 +334,8 @@ For all generated text values in the JSON object: DO NOT USE ANY MARKDOWN FORMAT
 }
 
 router.post('/', limiter, async (c) => {
+  let reservedDay = null
+
   try {
     const { username } = await c.req.json()
 
@@ -366,10 +369,32 @@ router.post('/', limiter, async (c) => {
         }, 200)
       }
 
+      let quota
+      try {
+        quota = await reserveDailyRoast()
+      } catch (quotaError) {
+        console.error('Daily roast quota check failed:', quotaError)
+        return c.json({ success: false, message: 'Unable to check daily roast capacity' }, 503)
+      }
+
+      if (!quota.allowed) {
+        c.header('Retry-After', String(Math.max(1, Math.ceil((quota.resetAt.getTime() - Date.now()) / 1000))))
+        return c.json({
+          success: false,
+          message: `Daily roast limit of ${DAILY_ROAST_LIMIT} reached. Please try again after 00:00 UTC.`,
+          limit: DAILY_ROAST_LIMIT,
+          remaining: 0,
+          resetAt: quota.resetAt.toISOString(),
+        }, 429)
+      }
+      reservedDay = quota.day
+
       const userProfile = await fetchUserProfile(cleanUsername);
       const comments = await fetchRedditComments(cleanUsername, 500);
 
       if (comments.length === 0) {
+        await releaseDailyRoast(reservedDay)
+        reservedDay = null
         return c.json({
           success: false,
           message: 'No comments found for this user'
@@ -397,21 +422,28 @@ router.post('/', limiter, async (c) => {
       }
 
       try {
+        await generateRoastQuestions(comments, cleanUsername);
+        reservedDay = null
 
         generateCombinedRoast(comments, cleanUsername).catch(error => {
           console.error('Background roast generation failed:', error);
         });
-        
-        await generateRoastQuestions(comments, cleanUsername);
 
         return c.json({
           success: true,
           redirect: false,
           message: 'Questions generated successfully, roast analysis generating in background',
+          dailyLimit: DAILY_ROAST_LIMIT,
+          dailyRemaining: quota.remaining,
         }, 200);
 
       } catch (questionsError) {
         console.error('Error generating questions:', questionsError);
+        await Promise.allSettled([
+          releaseDailyRoast(reservedDay),
+          Roast.deleteOne({ username: cleanUsername, questions: { $in: [null, ''] }, roast: { $in: [null, ''] } }),
+        ])
+        reservedDay = null
         return c.json({
           success: false,
           message: 'Failed to generate roast questions',
@@ -421,7 +453,11 @@ router.post('/', limiter, async (c) => {
 
     } catch (redditError) {
       console.error('Reddit fetch error:', redditError)
-      
+      if (reservedDay) {
+        await releaseDailyRoast(reservedDay).catch(error => console.error('Failed to release daily roast slot:', error))
+        reservedDay = null
+      }
+
       return c.json({
         success: false,
         message: redditError.message || 'Failed to fetch Reddit data'
@@ -430,6 +466,9 @@ router.post('/', limiter, async (c) => {
     
   } catch (error) {
     console.error('Error in roast generation:', error)
+    if (reservedDay) {
+      await releaseDailyRoast(reservedDay).catch(releaseError => console.error('Failed to release daily roast slot:', releaseError))
+    }
     return c.json({
       success: false,
       message: 'Failed to process roast request',
